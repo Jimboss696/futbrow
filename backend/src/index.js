@@ -6,6 +6,7 @@ const path = require('path');
 
 const canchasRoutes = require('./routes/canchasRoutes');
 const reservasRoutes = require('./routes/reservasRoutes'); 
+const authRoutes = require('./routes/authRoutes'); // NUEVA RUTA DE SEGURIDAD
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -13,13 +14,12 @@ const PORT = process.env.PORT || 3000;
 app.use(cors());
 app.use(express.json());
 
-// Le decimos a Express que la carpeta uploads es pública para poder ver las fotos
 app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
 
 app.use('/api/canchas', canchasRoutes);
 app.use('/api/reservas', reservasRoutes);
+app.use('/api/auth', authRoutes); // NUEVO: Conectamos el login y registro
 
-// Ruta de prueba base
 app.get('/', async (req, res) => {
     try {
         const result = await pool.query('SELECT NOW()');
