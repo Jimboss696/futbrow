@@ -8,13 +8,14 @@ export default function LoginScreen() {
   const [isLogin, setIsLogin] = useState(true);
   
   const [nombre, setNombre] = useState('');
+  const [nickname, setNickname] = useState('');
   const [email, setEmail] = useState('');
   const [telefono, setTelefono] = useState('');
   const [password, setPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
 
-  const handleAuth = async () => {
-    if (!email || !password || (!isLogin && (!nombre || !telefono))) {
+const handleAuth = async () => {
+    if (!email || !password || (!isLogin && (!nombre || !telefono || !nickname))) {
       Alert.alert('Error', 'Por favor llena todos los campos');
       return;
     }
@@ -26,7 +27,7 @@ export default function LoginScreen() {
 
     const bodyData = isLogin 
       ? { email, password } 
-      : { nombre, email, telefono, password, rol: 'cliente' };
+      : { nombre, nickname, email, telefono, password, rol: 'cliente' };
 
     try {
       const response = await fetch(url, {
@@ -72,6 +73,13 @@ export default function LoginScreen() {
               placeholderTextColor="#999" 
               value={nombre} 
               onChangeText={setNombre} 
+            />
+             <TextInput 
+              style={styles.input} 
+              placeholder="Nickname (ej. Jimboss696)" 
+              placeholderTextColor="#999" 
+              value={nickname} onChangeText={setNickname} 
+              autoCapitalize="none" 
             />
             <TextInput 
               style={styles.input} 

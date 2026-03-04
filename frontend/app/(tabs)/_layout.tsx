@@ -53,6 +53,12 @@ export default function TabLayout() {
           headerShown: false 
         }} 
       />
+      
+      <Tabs.Screen 
+        name="mis-reservas" 
+        options={{ title: 'Mis Reservas', headerShown: false }} 
+      />
+
       <Tabs.Screen 
         name="admin" 
         options={{ 

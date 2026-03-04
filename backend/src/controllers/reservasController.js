@@ -2,31 +2,52 @@ const pool = require('../db');
 
 const crearReserva = async (req, res) => {
     try {
-        const { usuario_id = 1, cancha_id, fecha_reserva, hora_inicio, hora_fin } = req.body;
+        const usuario_id = req.usuario.id; 
+        const { cancha_id, fecha_reserva, hora_inicio, hora_fin, metodo_pago } = req.body;
         const comprobante = req.file;
 
-        if (!comprobante) {
-            return res.status(400).json({ error: 'Debes adjuntar el comprobante de transferencia' });
+        // 1. ¡ELIMINAMOS LA RESTRICCIÓN DE 09:00 A 22:00! AHORA ES 24/7.
+        
+        // 2. REGLA ANTI-OVERBOOKING (Opción A)
+        const overlapQuery = `
+            SELECT id FROM reservas 
+            WHERE cancha_id = $1 
+            AND fecha_reserva = $2 
+            AND estado_pago != 'rechazado'
+            AND (hora_inicio < $4 AND hora_fin > $3)
+        `;
+        const overlapResult = await pool.query(overlapQuery, [cancha_id, fecha_reserva, hora_inicio, hora_fin]);
+
+        if (overlapResult.rows.length > 0) {
+            return res.status(409).json({ error: 'Este horario ya está reservado. Por favor elige otro.' });
         }
 
-        const horaInicioNum = parseInt(hora_inicio.split(':')[0]);
-        const horaFinNum = parseInt(hora_fin.split(':')[0]);
+        // 3. LÓGICA CONDICIONAL DE PAGOS
+        let estado_pago = 'pendiente';
+        let comprobante_url = null;
 
-        if (horaInicioNum < 9 || horaFinNum > 22) {
-            return res.status(400).json({ error: 'El horario de atención regular es de 09:00 a 22:00.' });
+        if (metodo_pago === 'transferencia') {
+            if (!comprobante) {
+                return res.status(400).json({ error: 'Debes adjuntar el comprobante para transferencias.' });
+            }
+            comprobante_url = `/uploads/${comprobante.filename}`;
+            estado_pago = 'pendiente'; 
+        } else if (metodo_pago === 'efectivo') {
+            estado_pago = 'por confirmar'; 
+        } else {
+            return res.status(400).json({ error: 'Método de pago no válido.' });
         }
 
-        const comprobante_url = `/uploads/${comprobante.filename}`;
-
+        // 4. INSERTAR EN LA BASE DE DATOS
         const result = await pool.query(
             `INSERT INTO reservas 
-            (usuario_id, cancha_id, fecha_reserva, hora_inicio, hora_fin, estado_pago, comprobante_url) 
-            VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
-            [usuario_id, cancha_id, fecha_reserva, hora_inicio, hora_fin, 'pendiente', comprobante_url]
+            (usuario_id, cancha_id, fecha_reserva, hora_inicio, hora_fin, estado_pago, comprobante_url, metodo_pago) 
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
+            [usuario_id, cancha_id, fecha_reserva, hora_inicio, hora_fin, estado_pago, comprobante_url, metodo_pago]
         );
 
         res.status(201).json({
-            mensaje: 'Reserva creada con éxito. Pendiente de validación.',
+            mensaje: 'Reserva procesada con éxito.',
             reserva: result.rows[0]
         });
 
@@ -36,11 +57,10 @@ const crearReserva = async (req, res) => {
     }
 };
 
-// 1. Obtener todas las reservas (Para el Dashboard del Admin)
 const getTodasLasReservas = async (req, res) => {
     try {
         const query = `
-            SELECT r.id, r.fecha_reserva, r.hora_inicio, r.hora_fin, r.estado_pago, r.comprobante_url, r.creado_en,
+            SELECT r.id, r.fecha_reserva, r.hora_inicio, r.hora_fin, r.estado_pago, r.comprobante_url, r.creado_en, r.metodo_pago,
                    c.nombre AS cancha_nombre, 
                    u.nombre AS usuario_nombre, u.telefono
             FROM reservas r
@@ -56,13 +76,12 @@ const getTodasLasReservas = async (req, res) => {
     }
 };
 
-// 2. Actualizar el estado del pago (Validar o Rechazar)
 const actualizarEstadoReserva = async (req, res) => {
     try {
         const { id } = req.params; 
         const { estado_pago } = req.body; 
 
-        if (!['validado', 'rechazado', 'pendiente'].includes(estado_pago)) {
+        if (!['validado', 'rechazado', 'pendiente', 'por confirmar'].includes(estado_pago)) {
             return res.status(400).json({ error: 'Estado de pago no válido' });
         }
 
@@ -85,8 +104,46 @@ const actualizarEstadoReserva = async (req, res) => {
     }
 };
 
+// Obtener horarios ocupados para una cancha y fecha específica
+const getHorariosOcupados = async (req, res) => {
+    try {
+        const { cancha_id, fecha } = req.params;
+        const query = `
+            SELECT hora_inicio, hora_fin 
+            FROM reservas 
+            WHERE cancha_id = $1 AND fecha_reserva = $2 AND estado_pago != 'rechazado'
+        `;
+        const result = await pool.query(query, [cancha_id, fecha]);
+        res.status(200).json(result.rows);
+    } catch (error) {
+        console.error('Error obteniendo disponibilidad:', error);
+        res.status(500).json({ error: 'Error interno del servidor' });
+    }
+};
+
+// Obtener las reservas del usuario que inició sesión
+const getMisReservas = async (req, res) => {
+    try {
+        const usuario_id = req.usuario.id;
+        const query = `
+            SELECT r.*, c.nombre AS cancha_nombre 
+            FROM reservas r
+            JOIN canchas c ON r.cancha_id = c.id
+            WHERE r.usuario_id = $1
+            ORDER BY r.creado_en DESC
+        `;
+        const result = await pool.query(query, [usuario_id]);
+        res.status(200).json(result.rows);
+    } catch (error) {
+        console.error('Error obteniendo mis reservas:', error);
+        res.status(500).json({ error: 'Error interno del servidor' });
+    }
+};
+
 module.exports = {
     crearReserva,
     getTodasLasReservas,
-    actualizarEstadoReserva
+    actualizarEstadoReserva,
+    getHorariosOcupados,
+    getMisReservas // <- para mis reservas
 };

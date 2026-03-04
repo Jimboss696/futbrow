@@ -1,24 +1,40 @@
 import React, { useState, useCallback } from 'react';
 import { View, Text, StyleSheet, FlatList, ActivityIndicator, TouchableOpacity, Image, Alert, SafeAreaView } from 'react-native';
-// CORRECCIÓN: Importamos useFocusEffect desde su origen correcto en versiones modernas
 import { useFocusEffect } from '@react-navigation/native';
+import * as SecureStore from 'expo-secure-store';
 
 export default function AdminDashboardScreen() {
   const [reservas, setReservas] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
+  // Esta función obtiene las reservas del backend
   const fetchReservas = async () => {
     try {
-      const response = await fetch('http://192.168.1.2:3000/api/reservas');
+      const token = await SecureStore.getItemAsync('jwt_token');
+
+      const response = await fetch('http://192.168.1.2:3000/api/reservas', {
+        headers: {
+          'Authorization': `Bearer ${token}` 
+        }
+      });
+      
       const data = await response.json();
-      setReservas(data);
-      setLoading(false);
+      
+      if (response.ok) {
+        setReservas(data);
+      } else {
+        console.error("El servidor bloqueó la petición:", data);
+        setReservas([]);
+      }
     } catch (error) {
       console.error("Error obteniendo reservas:", error);
+    } finally {
       setLoading(false);
     }
   };
 
+  // ¡ESTA ES LA PIEZA QUE SE NOS HABÍA BORRADO!
+  // Hace que fetchReservas se ejecute cada vez que entras a la pestaña
   useFocusEffect(
     useCallback(() => {
       setLoading(true);
@@ -26,12 +42,16 @@ export default function AdminDashboardScreen() {
     }, [])
   );
 
+  // Función para ejecutar el PUT y cambiar el estado
   const actualizarEstado = async (id: number, nuevoEstado: string) => {
     try {
+      const token = await SecureStore.getItemAsync('jwt_token');
+
       const response = await fetch(`http://192.168.1.2:3000/api/reservas/${id}/estado`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}` 
         },
         body: JSON.stringify({ estado_pago: nuevoEstado }),
       });
@@ -53,6 +73,11 @@ export default function AdminDashboardScreen() {
     if (item.estado_pago === 'validado') badgeColor = '#28a745'; 
     if (item.estado_pago === 'rechazado') badgeColor = '#dc3545'; 
 
+    // CALCULAMOS EL TOTAL A PAGAR (Fin - Inicio * $5)
+    const inicio = parseInt(item.hora_inicio.split(':')[0]);
+    const fin = parseInt(item.hora_fin.split(':')[0]);
+    const totalPagar = (fin - inicio) * 5;
+    
     return (
       <View style={styles.card}>
         <View style={styles.cardHeader}>
@@ -68,6 +93,11 @@ export default function AdminDashboardScreen() {
         </View>
         
         <View style={styles.infoRow}>
+          <Text style={styles.label}>Cliente:</Text>
+          <Text style={styles.value}>{item.usuario_nombre}</Text>
+        </View>
+        
+        <View style={styles.infoRow}>
           <Text style={styles.label}>Fecha:</Text>
           <Text style={styles.value}>{new Date(item.fecha_reserva).toLocaleDateString()}</Text>
         </View>
@@ -76,14 +106,30 @@ export default function AdminDashboardScreen() {
           <Text style={styles.label}>Horario:</Text>
           <Text style={styles.value}>{item.hora_inicio} - {item.hora_fin}</Text>
         </View>
-
+        
+        <View style={styles.infoRow}>
+          <Text style={styles.label}>Total:</Text>
+          <Text style={[styles.value, {fontWeight: 'bold', color: '#28a745'}]}>${totalPagar.toFixed(2)}</Text>
+        </View>
+        
+        <View style={styles.infoRow}>
+          <Text style={styles.label}>Método:</Text>
+          <Text style={styles.value}>{item.metodo_pago.toUpperCase()}</Text>
+        </View>
+        
         <Text style={styles.sectionTitle}>Comprobante adjunto:</Text>
-        <Image 
-          source={{ uri: `http://192.168.1.2:3000${item.comprobante_url}` }} 
-          style={styles.comprobanteImage} 
-        />
+{item.comprobante_url ? (
+  <Image 
+    source={{ uri: `http://192.168.1.2:3000${item.comprobante_url}` }} 
+    style={styles.comprobanteImage} 
+  />
+) : (
+  <View style={[styles.comprobanteImage, { justifyContent: 'center', alignItems: 'center' }]}>
+    <Text style={{ color: '#666', fontWeight: 'bold', fontSize: 16 }}>💵 Pago en Efectivo (Sin foto)</Text>
+  </View>
+)}
 
-        {item.estado_pago === 'pendiente' && (
+        {(item.estado_pago === 'pendiente' || item.estado_pago === 'por confirmar') && (
           <View style={styles.actionButtons}>
             <TouchableOpacity 
               style={[styles.btn, styles.btnReject]} 
